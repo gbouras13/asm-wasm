@@ -1,0 +1,122 @@
+SPAdes 4.2.0 -> Emscripten: C/C++ platform guards (no behaviour change on native platforms).
+
+* llvm-support SwapByteOrder.h: emscripten (musl) provides <endian.h> like Linux.
+* llvm-support Path.inc: getMainExecutable() has no implementation for emscripten
+  (#error); SPAdes never calls it, so return "".
+* cppformat format.cc: _GNU_SOURCE is predefined by emscripten's clang in C++ mode, but
+  musl only has the XSI (int-returning) strerror_r.
+* easel esl_cpu.c: cpuid inline asm does not exist on wasm; report SSE/SSE2/SSE4.1, which
+  emscripten implements on top of wasm SIMD128 (easel/hmmer are only used by the
+  biosynthetic/corona HMM modes, not by --isolate).
+* xxhash.h: with -msimd128 xxhash picks <arm_neon.h> (SIMDe), and emscripten's copy pulls in
+  <emscripten.h>, whose C++ templates break inside xxhash's extern "C" block. Use the scalar
+  XXH3 path on emscripten (hash values are identical by specification).
+* xmath.h: uses ::size_t without including a header that declares it; older libc++ leaked
+  it through <limits>/<cmath>, emscripten's libc++ (LLVM 24) does not.
+* folly PackedSyncPtr.h: packs a pointer into the low 48 bits of a 64-bit word; valid for
+  wasm64 (heap <= 16 GB). (wasm32 would need a 64-bit storage word instead of uintptr_t.)
+
+diff --git a/ext/include/folly/PackedSyncPtr.h b/ext/include/folly/PackedSyncPtr.h
+index c91a204..42a7f89 100644
+--- a/ext/include/folly/PackedSyncPtr.h
++++ b/ext/include/folly/PackedSyncPtr.h
+@@ -21,7 +21,7 @@
+ #include <folly/Portability.h>
+ #include <folly/synchronization/PicoSpinLock.h>
+ 
+-#if !FOLLY_X64 && !FOLLY_PPC64 && !FOLLY_AARCH64
++#if !FOLLY_X64 && !FOLLY_PPC64 && !FOLLY_AARCH64 && !defined(__wasm64__)
+ #error "PackedSyncPtr is x64, ppc64 or aarch64 specific code."
+ #endif
+ 
+diff --git a/ext/include/llvm/Support/SwapByteOrder.h b/ext/include/llvm/Support/SwapByteOrder.h
+index a9f4373..143ead0 100644
+--- a/ext/include/llvm/Support/SwapByteOrder.h
++++ b/ext/include/llvm/Support/SwapByteOrder.h
+@@ -21,7 +21,7 @@
+ #include <stdlib.h>
+ #endif
+ 
+-#if defined(__linux__) || defined(__GNU__) || defined(__HAIKU__)
++#if defined(__linux__) || defined(__GNU__) || defined(__HAIKU__) || defined(__EMSCRIPTEN__)
+ #include <endian.h>
+ #elif defined(_AIX)
+ #include <sys/machine.h>
+diff --git a/ext/include/xxh/xxhash.h b/ext/include/xxh/xxhash.h
+index d11f0f6..806d70d 100644
+--- a/ext/include/xxh/xxhash.h
++++ b/ext/include/xxh/xxhash.h
+@@ -3693,7 +3693,7 @@ XXH_PUBLIC_API XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const XXH64_can
+ #  if defined(__ARM_NEON__) || defined(__ARM_NEON) \
+    || (defined(_M_ARM) && _M_ARM >= 7) \
+    || defined(_M_ARM64) || defined(_M_ARM64EC) \
+-   || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* WASM SIMD128 via SIMDe */
++   || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>) && !defined(__EMSCRIPTEN__)) /* WASM SIMD128 via SIMDe */
+ #    define inline __inline__  /* circumvent a clang bug */
+ #    include <arm_neon.h>
+ #    undef inline
+@@ -3853,7 +3853,7 @@ enum XXH_VECTOR_TYPE /* fake enum */ {
+ #  elif ( \
+         defined(__ARM_NEON__) || defined(__ARM_NEON) /* gcc */ \
+      || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC) /* msvc */ \
+-     || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* wasm simd128 via SIMDe */ \
++     || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>) && !defined(__EMSCRIPTEN__)) /* wasm simd128 via SIMDe */ \
+    ) && ( \
+         defined(_WIN32) || defined(__LITTLE_ENDIAN__) /* little endian only */ \
+     || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) \
+diff --git a/ext/src/cppformat/format.cc b/ext/src/cppformat/format.cc
+index baa97ef..a8f02e7 100644
+--- a/ext/src/cppformat/format.cc
++++ b/ext/src/cppformat/format.cc
+@@ -137,7 +137,7 @@ int safe_strerror(
+     int error_code, char *&buffer, std::size_t buffer_size) FMT_NOEXCEPT(true) {
+   assert(buffer != 0 && buffer_size != 0);
+   int result = 0;
+-#ifdef _GNU_SOURCE
++#if defined(_GNU_SOURCE) && !defined(__EMSCRIPTEN__)  // musl: XSI strerror_r
+   char *message = strerror_r(error_code, buffer, buffer_size);
+   // If the buffer is full then the message is probably truncated.
+   if (message == buffer && strlen(buffer) == buffer_size - 1)
+diff --git a/ext/src/easel/esl_cpu.c b/ext/src/easel/esl_cpu.c
+index 0957831..b170cb0 100644
+--- a/ext/src/easel/esl_cpu.c
++++ b/ext/src/easel/esl_cpu.c
+@@ -203,6 +203,12 @@ cpu_run_id(uint32_t eax, uint32_t ecx, uint32_t *abcd)
+ {
+ #if defined(_MSC_VER)
+   __cpuidex(abcd, eax, ecx);
++#elif defined(__EMSCRIPTEN__)
++  /* no cpuid: report SSE+SSE2 (edx 25,26) and SSE4.1 (ecx 19), which emscripten emulates */
++  (void)ecx;
++  abcd[0] = abcd[1] = 0;
++  abcd[2] = (eax == 1) ? (1u << 19) : 0;
++  abcd[3] = (eax == 1) ? ((1u << 25) | (1u << 26)) : 0;
+ #else
+   uint32_t ebx = 0;
+   uint32_t edx = 0;
+diff --git a/ext/src/llvm/Path.inc b/ext/src/llvm/Path.inc
+index 783a7ac..d231c1d 100644
+--- a/ext/src/llvm/Path.inc
++++ b/ext/src/llvm/Path.inc
+@@ -282,6 +282,9 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
+   char link_path[PATH_MAX];
+   if (realpath(DLInfo.dli_fname, link_path))
+     return link_path;
++#elif defined(__EMSCRIPTEN__)
++  // No executable file under WebAssembly; unused by SPAdes.
++  (void)argv0; (void)MainAddr;
+ #else
+ #error GetMainExecutable is not implemented on this host yet.
+ #endif
+diff --git a/src/common/math/xmath.h b/src/common/math/xmath.h
+index 36c8557..041f0a7 100644
+--- a/src/common/math/xmath.h
++++ b/src/common/math/xmath.h
+@@ -11,6 +11,7 @@
+ 
+ #include <limits>
+ #include <cmath>
++#include <stddef.h>
+ 
+ namespace math {
+ // Copyright 2005, Google Inc.

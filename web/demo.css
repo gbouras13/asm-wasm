@@ -1,0 +1,49 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1d2330;
+  --muted: #5a6475;
+  --accent: #1f6feb;
+  --panel: #f4f6f9;
+  --border: #d5dae2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151c;
+    --fg: #e6e9ef;
+    --muted: #9aa4b5;
+    --accent: #5b9bff;
+    --panel: #1a2029;
+    --border: #2c3542;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.lede, .note { color: var(--muted); margin-top: 0; }
+form { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; flex: 1; min-width: 160px; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+input, select, button { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.buttons { justify-content: flex-start; }
+button { cursor: pointer; flex: 0 0 auto; }
+button#run { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+.status { font-weight: 600; }
+#downloads a { display: inline-block; margin: 0 12px 8px 0; color: var(--accent); }
+pre#log {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 420px;
+  overflow: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

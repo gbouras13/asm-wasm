@@ -1,0 +1,35 @@
+SPAdes 4.2.0 -> Emscripten: meaningful memory figure in the log.
+
+emscripten's getrusage() stub fills only ru_utime/ru_stime, so get_max_rss() returned
+uninitialised stack memory and every log line showed a random memory column (e.g.
+"1511828488193G"). Report the WebAssembly heap size (which only grows, i.e. the peak) instead.
+get_max_rss() is used only for logging and for SPAdes' free-memory estimate, which is
+"unlimited minus used" here as on native macOS (setrlimit fails on both), so outputs are unchanged.
+
+diff --git a/src/common/utils/memory_limit.cpp b/src/common/utils/memory_limit.cpp
+index b5e3ca0..cd0e175 100644
+--- a/src/common/utils/memory_limit.cpp
++++ b/src/common/utils/memory_limit.cpp
+@@ -22,6 +22,9 @@
+ 
+ #include <sys/time.h>
+ #include <sys/resource.h>
++#ifdef __EMSCRIPTEN__
++# include <emscripten/heap.h>
++#endif
+ 
+ #include "config.hpp"
+ 
+@@ -77,6 +80,12 @@ size_t get_max_rss() {
+ 
+   return t_info.resident_size / 1024;
+ }
++#elif defined(__EMSCRIPTEN__)
++// emscripten's getrusage() leaves ru_maxrss unset (garbage in every log line); report the
++// WebAssembly heap size instead (it only grows, so it is the peak), in KiB like ru_maxrss.
++size_t get_max_rss() {
++    return emscripten_get_heap_size() / 1024;
++}
+ #else
+ 
+ size_t get_max_rss() {

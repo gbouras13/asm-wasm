@@ -1,0 +1,398 @@
+diff --git a/src/assemble/chimera.cpp b/src/assemble/chimera.cpp
+index 6e29c70..8da5450 100644
+--- a/src/assemble/chimera.cpp
++++ b/src/assemble/chimera.cpp
+@@ -12,6 +12,7 @@
+ #include "../common/config.h"
+ #include "../common/logger.h"
+ #include "chimera.h"
++#include "../common/portable_rand.h"
+ 
+ 
+ 
+@@ -73,7 +74,7 @@ void ChimeraDetector::estimateGlobalCoverage()
+ 	int64_t num = 0;
+ 	for (const auto& seq : _seqContainer.iterSeqs())
+ 	{
+-		if (rand() % sampleRate) continue;
++		if (portableRand() % sampleRate) continue;
+ 		auto coverage = this->getReadCoverage(seq.id, _ovlpContainer.lazySeqOverlaps(seq.id));
+ 		bool nonZero = false;
+ 		for (auto c : coverage) nonZero |= (c != 0);
+diff --git a/src/assemble/extender.cpp b/src/assemble/extender.cpp
+index 29320a3..b27c438 100644
+--- a/src/assemble/extender.cpp
++++ b/src/assemble/extender.cpp
+@@ -83,7 +83,7 @@ Extender::ExtensionInfo Extender::extendDisjointig(FastaRecord::Id startRead)
+ 		numExtensions.push_back(extensions.size());
+ 
+ 		//sort from longes to shortest overlap
+-		std::sort(extensions.begin(), extensions.end(), 
++		std::stable_sort(extensions.begin(), extensions.end(), 
+ 				  [](const OverlapRange& a, const OverlapRange& b)
+ 					 {return a.curRange() > b.curRange();});
+ 
+@@ -393,7 +393,7 @@ void Extender::assembleDisjointigs()
+ 	};
+ 
+ 	//deterministic shuffling
+-	std::sort(allReads.begin(), allReads.end(), 
++	std::stable_sort(allReads.begin(), allReads.end(), 
+ 			  [](const FastaRecord::Id& id1, const FastaRecord::Id& id2)
+ 			  {return id1.hash() < id2.hash();});
+ 	processInParallel(allReads, threadWorker,
+@@ -412,7 +412,7 @@ void Extender::assembleDisjointigs()
+ 				sortedByLength.push_back(seq.id);
+ 			}
+ 		}
+-		std::sort(sortedByLength.begin(), sortedByLength.end(),
++		std::stable_sort(sortedByLength.begin(), sortedByLength.end(),
+ 				  [this](FastaRecord::Id idOne, FastaRecord::Id idTwo)
+ 				  	{return _readsContainer.seqLen(idOne) > 
+ 							_readsContainer.seqLen(idTwo);});
+diff --git a/src/common/portable_rand.h b/src/common/portable_rand.h
+new file mode 100644
+index 0000000..277387a
+--- /dev/null
++++ b/src/common/portable_rand.h
+@@ -0,0 +1,43 @@
++//(c) 2016 by Authors
++//This file is a part of ABruijn program.
++//Released under the BSD license (see LICENSE file)
++
++#pragma once
++
++#include <cstdint>
++#include <mutex>
++
++//Platform-independent replacement for rand(). The C library rand() differs
++//between glibc, macOS libc and musl (e.g. WebAssembly builds), so the reads
++//sampled for parameter estimation - and hence the assembly - depended on the
++//platform. This reproduces the sequence of glibc's default-seeded rand(),
++//so results match Flye built on Linux.
++inline int portableRand()
++{
++	static std::mutex mtx;
++	static uint32_t r[34];
++	static uint64_t n = 0;
++
++	std::lock_guard<std::mutex> lock(mtx);
++	if (n == 0)
++	{
++		int32_t word = 1;	//glibc default seed
++		r[0] = word;
++		for (int i = 1; i < 31; ++i)
++		{
++			//word = (16807 * word) % 2147483647 without overflow
++			int32_t hi = word / 127773;
++			int32_t lo = word % 127773;
++			word = 16807 * lo - 2836 * hi;
++			if (word < 0) word += 2147483647;
++			r[i] = word;
++		}
++		for (int i = 31; i < 34; ++i) r[i] = r[i - 31];
++		n = 34;
++		for (; n < 344; ++n) r[n % 34] = r[(n - 31) % 34] + r[(n - 3) % 34];
++	}
++	uint32_t val = r[(n - 31) % 34] + r[(n - 3) % 34];
++	r[n % 34] = val;
++	++n;
++	return (int)(val >> 1);
++}
+diff --git a/src/common/utils.h b/src/common/utils.h
+index 826b7ee..11254c3 100644
+--- a/src/common/utils.h
++++ b/src/common/utils.h
+@@ -38,7 +38,7 @@ T quantile(const std::vector<T>& vec, int percent)
+ 	//std::nth_element(vec.begin(), vec.begin() + vec.size() / 2, 
+ 	//				 vec.end());
+ 	auto sortedVec = vec;
+-	std::sort(sortedVec.begin(), sortedVec.end());
++	std::stable_sort(sortedVec.begin(), sortedVec.end());
+ 	size_t targetId = std::min(vec.size() * (size_t)percent / 100, 
+ 							   vec.size() - 1);
+ 	return sortedVec[targetId];
+diff --git a/src/polishing/general_polisher.cpp b/src/polishing/general_polisher.cpp
+index ef071ca..628c8bc 100644
+--- a/src/polishing/general_polisher.cpp
++++ b/src/polishing/general_polisher.cpp
+@@ -39,7 +39,7 @@ void GeneralPolisher::polishBubble(Bubble& bubble) const
+ 	std::string prePolished = bubble.candidate;
+ 	if (bubble.branches.size() > PRE_POLISH * 2)
+ 	{
+-		std::sort(bubble.branches.begin(), bubble.branches.end(),
++		std::stable_sort(bubble.branches.begin(), bubble.branches.end(),
+ 				  [](const std::string& s1, const std::string& s2)
+ 				     {return s1.length() < s2.length();});
+ 		size_t left = bubble.branches.size() / 2 - PRE_POLISH / 2;
+diff --git a/src/polishing/homo_polisher.cpp b/src/polishing/homo_polisher.cpp
+index d05a0ea..d67a3ce 100644
+--- a/src/polishing/homo_polisher.cpp
++++ b/src/polishing/homo_polisher.cpp
+@@ -262,7 +262,7 @@ size_t HomoPolisher::mostLikelyLen(char nucleotide,
+ 		scores.push_back(std::make_pair(likelihood, len));
+ 	}
+ 
+-	std::sort(scores.begin(), scores.end(), 
++	std::stable_sort(scores.begin(), scores.end(), 
+ 			  [](const ScorePair& p1, const ScorePair& p2)
+ 			  {return p1.first > p2.first;});
+ 
+diff --git a/src/repeat_graph/haplotype_resolver.cpp b/src/repeat_graph/haplotype_resolver.cpp
+index f8142b5..10a3b6c 100644
+--- a/src/repeat_graph/haplotype_resolver.cpp
++++ b/src/repeat_graph/haplotype_resolver.cpp
+@@ -243,7 +243,7 @@ HaplotypeResolver::VariantPaths
+ 	}
+ 	if (outPaths.empty()) return VariantPaths();
+ 
+-	std::sort(outPaths.begin(), outPaths.end(),
++	std::stable_sort(outPaths.begin(), outPaths.end(),
+ 			  [](const GraphAlignment& a1, const GraphAlignment& a2)
+ 			  {return a1.back().overlap.curEnd - a1.front().overlap.curEnd >
+ 					  a2.back().overlap.curEnd - a2.front().overlap.curEnd;});
+@@ -456,7 +456,7 @@ HaplotypeResolver::VariantPaths
+ 		}
+ 	}
+ 	if (bridgingReads.empty()) throw std::runtime_error("No bridging reads!");
+-	std::sort(bridgingReads.begin(), bridgingReads.end(),
++	std::stable_sort(bridgingReads.begin(), bridgingReads.end(),
+ 			  [](const GraphAlignment& a1, const GraphAlignment& a2)
+ 			  {return a1.back().overlap.curBegin - a1.front().overlap.curEnd <
+ 			  		  a2.back().overlap.curBegin - a2.front().overlap.curEnd;});
+diff --git a/src/repeat_graph/read_aligner.cpp b/src/repeat_graph/read_aligner.cpp
+index 2961e2a..e44a7cb 100644
+--- a/src/repeat_graph/read_aligner.cpp
++++ b/src/repeat_graph/read_aligner.cpp
+@@ -118,7 +118,7 @@ std::vector<GraphAlignment>
+ 
+ 	activeChains.insert(activeChains.end(), frozenChains.begin(), 
+ 						frozenChains.end());	
+-	std::sort(activeChains.begin(), activeChains.end(),
++	std::stable_sort(activeChains.begin(), activeChains.end(),
+ 			  [](const Chain& c1, const Chain& c2)
+ 			  {return c1.score > c2.score;});
+ 
+@@ -229,7 +229,7 @@ void ReadAligner::alignReads()
+ 			}
+ 
+ 		}
+-		std::sort(alignments.begin(), alignments.end(),
++		std::stable_sort(alignments.begin(), alignments.end(),
+ 		  [](const EdgeAlignment& e1, const EdgeAlignment& e2)
+ 			{return e1.overlap.curBegin < e2.overlap.curBegin;});
+ 		auto readChains = this->chainReadAlignments(alignments);
+diff --git a/src/repeat_graph/repeat_graph.cpp b/src/repeat_graph/repeat_graph.cpp
+index 7ee0bc1..7d050dc 100644
+--- a/src/repeat_graph/repeat_graph.cpp
++++ b/src/repeat_graph/repeat_graph.cpp
+@@ -42,7 +42,7 @@ namespace
+ 	template<class T, class KeyFn>
+ 	void sortByKey(std::vector<T>& container, KeyFn keyFn)
+ 	{
+-		std::sort(container.begin(), container.end(),
++		std::stable_sort(container.begin(), container.end(),
+ 				  [keyFn](const T& k1, const T& k2)
+ 				  {return keyFn(k1) < keyFn(k2);});
+ 	}
+diff --git a/src/repeat_graph/repeat_resolver.cpp b/src/repeat_graph/repeat_resolver.cpp
+index 7dce660..f75ee47 100644
+--- a/src/repeat_graph/repeat_resolver.cpp
++++ b/src/repeat_graph/repeat_resolver.cpp
+@@ -137,7 +137,7 @@ int RepeatResolver::resolveConnections(const std::vector<Connection>& connection
+ 			Logger::get().warning() << "Empty spanning connections";
+ 			continue;
+ 		}
+-		std::sort(spanningConnections.begin(), spanningConnections.end(),
++		std::stable_sort(spanningConnections.begin(), spanningConnections.end(),
+ 				  [](const Connection c1, const Connection c2)
+ 				{return c1.readSeq.length() < c2.readSeq.length();});
+ 		uniqueConnections
+@@ -531,7 +531,7 @@ void RepeatResolver::findRepeats()
+ 	//order might be important, process short edges first
+ 	std::vector<UnbranchingPath*> sortedPaths;
+ 	for (auto& path : unbranchingPaths) sortedPaths.push_back(&path);
+-	std::sort(sortedPaths.begin(), sortedPaths.end(),
++	std::stable_sort(sortedPaths.begin(), sortedPaths.end(),
+ 			  [](const UnbranchingPath* p1, const UnbranchingPath* p2) 
+ 			  {return p1->length < p2->length;});
+ 
+diff --git a/src/sequence/alignment.cpp b/src/sequence/alignment.cpp
+index 2d842d1..ea8b077 100644
+--- a/src/sequence/alignment.cpp
++++ b/src/sequence/alignment.cpp
+@@ -13,6 +13,7 @@
+ #undef HAVE_KALLOC
+ 
+ #include "edlib.h"
++#include "../common/portable_rand.h"
+ 
+ using namespace std::chrono;
+ 
+@@ -21,7 +22,7 @@ namespace
+ 	struct ThreadMemPool
+ 	{
+ 		ThreadMemPool():
+-			prevCleanup(system_clock::now() + seconds(rand() % 60))
++			prevCleanup(system_clock::now() + seconds(portableRand() % 60))
+ 		{
+ 		   memPool = km_init();
+ 		}
+@@ -411,7 +412,7 @@ std::vector<OverlapRange>
+ 	}
+ 
+ 	//sort intervals by acual length (not cigar length).
+-	std::sort(goodIntervals.begin(), goodIntervals.end(),
++	std::stable_sort(goodIntervals.begin(), goodIntervals.end(),
+ 			  [](const IntervalDiv& i1, const IntervalDiv& i2)
+ 			  {return i1.realLen > i2.realLen;});
+ 	
+diff --git a/src/sequence/overlap.cpp b/src/sequence/overlap.cpp
+index 1eb4131..521dcc4 100644
+--- a/src/sequence/overlap.cpp
++++ b/src/sequence/overlap.cpp
+@@ -20,6 +20,7 @@
+ #include "alignment.h"
+ #include "../common/config.h"
+ #include "../common/utils.h"
++#include "../common/portable_rand.h"
+ #include "../common/parallel.h"
+ #include "../common/disjoint_set.h"
+ #include "../common/bfcontainer.h"
+@@ -201,7 +202,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
+ 							(std::chrono::system_clock::now() - timeStart).count();
+ 	timeStart = std::chrono::system_clock::now();
+ 
+-	std::sort(vecMatches.begin(), vecMatches.end(),
++	std::stable_sort(vecMatches.begin(), vecMatches.end(),
+ 			  [](const KmerMatch& k1, const KmerMatch& k2)
+ 			  {return k1.extId != k2.extId ? k1.extId < k2.extId : 
+ 			  								 k1.curPos < k2.curPos;});
+@@ -272,7 +273,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
+ 		bool extSorted = extLen > curLen;
+ 		if (extSorted)
+ 		{
+-			std::sort(matchesList.begin(), matchesList.end(),
++			std::stable_sort(matchesList.begin(), matchesList.end(),
+ 					  [](const KmerMatch& k1, const KmerMatch& k2)
+ 					  {return k1.extPos < k2.extPos;});
+ 		}
+@@ -334,7 +335,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
+ 		//initiate chains from the highest scores in the table (e.g. local maximums)
+ 		std::vector<size_t> orderedScores(backtrackTable.size());
+ 		std::iota(orderedScores.begin(), orderedScores.end(), 0);
+-		std::sort(orderedScores.begin(), orderedScores.end(),
++		std::stable_sort(orderedScores.begin(), orderedScores.end(),
+ 				  [](size_t a, size_t b) {return scoreTable[a] > scoreTable[b];});
+ 
+ 		//for (int32_t chainStart = backtrackTable.size() - 1; 
+@@ -424,7 +425,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
+ 								  _vertexIndex.getSampleRate() / normLen;
+ 				matchRate = std::min(matchRate, 1.0f);
+ 				//float repeatRate = (float)filteredPositions / ovlp.curRange();
+-				ovlp.seqDivergence = std::log(1 / matchRate) / kmerSize;
++				ovlp.seqDivergence = (float)std::log((double)(1 / matchRate)) / kmerSize;
+ 				//ovlp.seqDivergence += _estimatorBias;
+ 				extOverlaps.push_back(ovlp);
+ 			}
+@@ -433,7 +434,7 @@ OverlapDetector::getSeqOverlaps(const FastaRecord& fastaRec,
+ 		//now we have a lits of (possibly multiple) putative overlaps
+ 		//agains a singe ext sequence. Now, select the list of primary overlaps
+ 		std::vector<OverlapRange> primaryOverlaps;
+-		std::sort(extOverlaps.begin(), extOverlaps.end(),
++		std::stable_sort(extOverlaps.begin(), extOverlaps.end(),
+ 				  [](const OverlapRange& r1, const OverlapRange& r2)
+ 				  {return r1.score > r2.score;});
+ 
+@@ -743,7 +744,7 @@ void OverlapContainer::filterOverlaps()
+ 		newOvlps.shrink_to_fit();
+ 		overlaps = std::move(newOvlps);
+ 
+-		std::sort(overlaps.begin(), overlaps.end(), 
++		std::stable_sort(overlaps.begin(), overlaps.end(), 
+ 				  [](const OverlapRange& o1, const OverlapRange& o2)
+ 				  {return o1.curBegin < o2.curBegin;});
+ 
+@@ -763,7 +764,7 @@ void OverlapContainer::estimateOverlaperParameters()
+ 	std::vector<FastaRecord::Id> readsToCheck;
+ 	for (size_t i = 0; i < MAX_SEQS; ++i) 
+ 	{
+-		size_t randId = rand() % _queryContainer.iterSeqs().size();
++		size_t randId = portableRand() % _queryContainer.iterSeqs().size();
+ 		readsToCheck.push_back(_queryContainer.iterSeqs()[randId].id);
+ 	}
+ 
+diff --git a/src/sequence/overlap.h b/src/sequence/overlap.h
+index 4c54882..75f1a3c 100644
+--- a/src/sequence/overlap.h
++++ b/src/sequence/overlap.h
+@@ -106,7 +106,7 @@ struct OverlapRange
+ 			{
+ 				std::swap(posPair.first, posPair.second);
+ 			}
+-			std::sort(rev.kmerMatches->begin(), rev.kmerMatches->end(),
++			std::stable_sort(rev.kmerMatches->begin(), rev.kmerMatches->end(),
+ 					  [](const std::pair<int32_t, int32_t>& p1,
+ 						 const std::pair<int32_t, int32_t>& p2)
+ 						 {return p1.first < p2.first;});
+diff --git a/src/sequence/sequence_container.cpp b/src/sequence/sequence_container.cpp
+index 99743f6..742848d 100644
+--- a/src/sequence/sequence_container.cpp
++++ b/src/sequence/sequence_container.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include "sequence_container.h"
+ #include "../common/logger.h"
++#include "../common/portable_rand.h"
+ 
+ size_t SequenceContainer::g_nextSeqId = 0;
+ 
+@@ -115,7 +116,7 @@ int SequenceContainer::computeNxStat(float fraction) const
+ 		readLengths.push_back(read.sequence.length());
+ 		totalLengh += read.sequence.length();
+ 	}
+-	std::sort(readLengths.begin(), readLengths.end(),
++	std::stable_sort(readLengths.begin(), readLengths.end(),
+ 			  [](int32_t a, int32_t b) {return a > b;});
+ 
+ 	int32_t nx = 0;
+@@ -324,7 +325,7 @@ void SequenceContainer::validateSequence(std::string& sequence)
+ 	{
+ 		if (DnaSequence::dnaToId(sequence[i]) == -1U)
+ 		{
+-			sequence[i] = VALID_CHARS[rand() % 4];
++			sequence[i] = VALID_CHARS[portableRand() % 4];
+ 		}
+ 	}
+ }
+diff --git a/src/sequence/vertex_index.cpp b/src/sequence/vertex_index.cpp
+index 3c608e5..932b6d4 100644
+--- a/src/sequence/vertex_index.cpp
++++ b/src/sequence/vertex_index.cpp
+@@ -108,7 +108,7 @@ void VertexIndex::buildIndexUnevenCoverage(int globalMinFreq, float selectRate,
+ 	Logger::get().debug() << "Sorting k-mer index";
+ 	for (const auto& kmerVec : _kmerIndex.lock_table())
+ 	{
+-		std::sort(kmerVec.second.data, kmerVec.second.data + kmerVec.second.size,
++		std::stable_sort(kmerVec.second.data, kmerVec.second.data + kmerVec.second.size,
+ 				  [](const IndexChunk& p1, const IndexChunk& p2)
+ 				  	{return p1.get() < p2.get();});
+ 	}
+@@ -197,7 +197,7 @@ std::vector<VertexIndex::KmerFreq>
+ 	}
+ 
+ 	if (topKmers.empty()) return {};
+-	std::sort(topKmers.begin(), topKmers.end(),
++	std::stable_sort(topKmers.begin(), topKmers.end(),
+ 			  [](const KmerFreq& k1, const KmerFreq& k2)
+ 			   {return k1.freq > k2.freq;});
+ 	const size_t maxKmers = selectRate * topKmers.size();
+@@ -326,7 +326,7 @@ void VertexIndex::buildIndexMinimizers(int minCoverage, int wndLen)
+ 	Logger::get().debug() << "Sorting k-mer index";
+ 	for (const auto& kmerVec : _kmerIndex.lock_table())
+ 	{
+-		std::sort(kmerVec.second.data, kmerVec.second.data + kmerVec.second.size,
++		std::stable_sort(kmerVec.second.data, kmerVec.second.data + kmerVec.second.size,
+ 				  [](const IndexChunk& p1, const IndexChunk& p2)
+ 				  	{return p1.get() < p2.get();});
+ 	}

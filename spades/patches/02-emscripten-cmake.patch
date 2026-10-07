@@ -1,0 +1,46 @@
+SPAdes 4.2.0 -> Emscripten: CMake adjustments.
+
+* flags.cmake: clang on "UNIX AND NOT APPLE" links -lsupc++; emscripten has no libsupc++
+  (em++ links its own libc++abi).
+* ssw, hmmercpp: these two targets include x86 SSE headers (<emmintrin.h> via ssw.h; hmmer.h ->
+  impl_sse.h). On arm64 natively ssw uses sse2neon; under emscripten the SSE headers need
+  -msse2/-msse4.1. The flag is PRIVATE so that no translation unit that includes phmap/boost
+  (whose hash-table layouts switch on __SSE2__) is compiled with SSE enabled: all SPAdes code
+  sees the same (portable, as on native arm64) layout.
+
+diff --git a/ext/src/ssw/CMakeLists.txt b/ext/src/ssw/CMakeLists.txt
+index 28a9263..1e9aed3 100644
+--- a/ext/src/ssw/CMakeLists.txt
++++ b/ext/src/ssw/CMakeLists.txt
+@@ -9,4 +9,7 @@ project(ssw C CXX)
+ add_library(ssw STATIC
+             ssw.c
+             ssw_cpp.cpp)
++if (EMSCRIPTEN)
++  target_compile_options(ssw PRIVATE -msimd128 -msse2)
++endif()
+ 
+diff --git a/src/cmake/flags.cmake b/src/cmake/flags.cmake
+index 6482765..804e185 100644
+--- a/src/cmake/flags.cmake
++++ b/src/cmake/flags.cmake
+@@ -23,7 +23,7 @@ add_compile_options(-Wno-deprecated)
+ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+   # Require libsupc++ on Linux
+-  if (UNIX AND NOT APPLE)
++  if (UNIX AND NOT APPLE AND NOT EMSCRIPTEN)  # emscripten's libc++abi is linked by em++
+     set(SYSTEM_LIBRARIES "supc++")
+   endif()
+ endif()
+diff --git a/src/common/hmm/CMakeLists.txt b/src/common/hmm/CMakeLists.txt
+index 12e79e4..9fab2ae 100644
+--- a/src/common/hmm/CMakeLists.txt
++++ b/src/common/hmm/CMakeLists.txt
+@@ -10,3 +10,6 @@ project(hmmercpp CXX)
+ add_library(hmmercpp STATIC
+             hmmfile.cpp hmmmatcher.cpp)
+ target_link_libraries(hmmercpp easel hmmer)
++if (EMSCRIPTEN)
++  target_compile_options(hmmercpp PRIVATE -msimd128 -msse4.1)
++endif()

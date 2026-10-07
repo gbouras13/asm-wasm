@@ -1,0 +1,4 @@
+[submodule "flye/Flye"]
+	path = flye/Flye
+	url = https://github.com/gbouras13/Flye.git
+	branch = asm-wasm
