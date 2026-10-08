@@ -81,7 +81,7 @@ test can set OMP_*/KMP_* in a `preRun`).
   k-mer storage types); wasm64 needs no source changes. Memory64 is in Chrome/Edge ≥ 133 and
   Firefox ≥ 134; the page detects support (`memory64Supported()` in `asm-client.js`) and
   explains when it is missing. A wasm32 build (other browsers, e.g. Safari until it ships
-  Memory64) would need patches like Flye's patch 02.
+  Memory64) would need changes like Flye's wasm32 commit (`flye/NOTES.md`).
 * **libomp hangs with ≥ 6 threads** in contended `omp critical` / `omp_set_lock` with its
   default queuing locks (reproduced with a 20-line program; independent of Memory64, allocator,
   pool size, KMP_BLOCKTIME). Test-and-set locks work: `omp_env.js` sets `KMP_LOCK_KIND=tas`.

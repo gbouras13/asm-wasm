@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Flye fork (asm_wasm/flye/Flye: Flye 2.9.6 + patches + the
+# Build the Flye fork (flye/Flye, a submodule: Flye 2.9.6 + fixes + the
 # single-process `flye-modules pipeline`) to WebAssembly.
 #
 #   ./build_wasm.sh [node] [web]      (default: both)
