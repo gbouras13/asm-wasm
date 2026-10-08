@@ -20,4 +20,21 @@ mkdir -p "$DEST/flye" "$DEST/spades"
 cp "$HERE/asm-client.js" "$HERE/asm-worker.js" "$HERE/spades-driver.js" "$HERE/reads.js" "$DEST/"
 cp "$DIST/flye/flye.mjs" "$DIST/flye/flye.wasm" "$DEST/flye/"
 cp "$DIST/spades/spades.mjs" "$DIST/spades/spades.wasm" "$DEST/spades/"
+
+# The licences travel with the modules (.txt so that browsers display them), and
+# SOURCE.txt records where their source is: the SPAdes build is GPL-2.0.
+ROOT="$(cd "$HERE/.." && pwd)"
+cp "$ROOT/LICENSE" "$DEST/LICENSE.txt"
+cp "$ROOT/THIRD_PARTY.md" "$DEST/THIRD_PARTY.txt"
+{
+  echo "These files are built from https://github.com/gbouras13/asm-wasm (GPL-2.0),"
+  echo "which contains their complete corresponding source; see THIRD_PARTY.txt."
+  echo
+  echo "asm-wasm commit:  $(git -C "$ROOT" rev-parse HEAD)"
+  echo "Flye fork commit: $(git -C "$ROOT/flye/Flye" rev-parse HEAD) (https://github.com/gbouras13/Flye)"
+  echo "SPAdes:           v4.2.0 (https://github.com/ablab/spades) + asm-wasm spades/patches/"
+} > "$DEST/SOURCE.txt"
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
+  echo "warning: asm-wasm has uncommitted changes; SOURCE.txt names the last commit" >&2
+fi
 ls -la "$DEST" "$DEST/flye" "$DEST/spades"
