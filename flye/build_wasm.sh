@@ -20,6 +20,9 @@ EMSDK_DIR="${EMSDK_DIR:-$HOME/.cache/asm-wasm/emsdk}"
 EMSDK_VERSION="${EMSDK_VERSION:-6.0.11}"
 JOBS="${JOBS:-8}"
 TARGETS="${*:-node web}"
+# Reproducible output: Flye logs its build date (__DATE__/__TIME__), so pin it to the
+# fork's last commit; the same source then always gives byte-identical modules
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$SRC" log -1 --format=%ct)}"
 
 if [[ ! -d "$EMSDK_DIR" ]]; then
   git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git "$EMSDK_DIR"
