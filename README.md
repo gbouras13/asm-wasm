@@ -36,6 +36,7 @@ web/
   reads.js           streaming (gzip) read access, seeded paired subsampling
   demo.html/js/css   standalone test page; serve.py serves it with the required headers
   sync_to_server.sh  copies the runtime and builds into a phage-annotation-server checkout
+  package.sh         makes the release tarball (runtime + web builds + licences)
   tests/
 dist/                build outputs (not in git; prebuilt modules are attached to releases)
 ```
@@ -61,7 +62,8 @@ dist/                build outputs (not in git; prebuilt modules are attached to
 ## Using it in a web page
 
 Serve `web/asm-client.js`, `asm-worker.js`, `spades-driver.js`, `reads.js` and the built
-`flye/` and `spades/` directories (from `dist/web/` or a release) from one directory, then:
+`flye/` and `spades/` directories from one directory (the `asm-wasm-web-*.tar.gz` file of a
+[release](https://github.com/gbouras13/asm-wasm/releases) is exactly that), then:
 
 ```js
 import {runAssembly, isSupported, memory64Supported, parseFasta} from "./asm-client.js";
